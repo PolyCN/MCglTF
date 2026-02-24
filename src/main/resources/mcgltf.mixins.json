@@ -3,6 +3,7 @@
 	"package": "com.poly.mcgltf.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"MixinEntity",
 		"MixinGameRenderer",
 		"MixinLevelRenderer"
 	],

@@ -4,7 +4,8 @@
 	"compatibilityLevel": "JAVA_21",
 	"plugin": "com.poly.mcgltf.iris.mixin.IrisCompatMixinPlugin",
 	"client": [
-		"MixinRenderType"
+		"MixinRenderType",
+		"MixinShadowRenderer"
 	],
 	"injectors": {
 		"defaultRequire": 1

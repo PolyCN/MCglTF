@@ -3,6 +3,7 @@ import com.poly.mcgltf.cache.ModelCachePool
 import com.poly.mcgltf.config.ConfigSystem
 import com.poly.mcgltf.iris.IrisRenderedGltfModel
 import com.poly.mcgltf.loader.AsyncModelLoader
+import com.poly.mcgltf.material.MaterialOverrideSystem
 import de.javagl.jgltf.model.GltfModel
 import de.javagl.jgltf.model.io.Buffers
 import de.javagl.jgltf.model.io.GltfModelReader
@@ -85,6 +86,7 @@ object MCglTFSystem : ClientModInitializer {
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4)
         val currentTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D)
         try {
+            MaterialOverrideSystem.onResourceManagerReload(resourceManager)
             val lookup = collectReceiverModels()
             loadModelsParallel(lookup, resourceManager)
             processLoadedModels(lookup)
