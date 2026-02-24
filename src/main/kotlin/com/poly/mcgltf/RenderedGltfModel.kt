@@ -345,12 +345,427 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         meshPrimitiveModel: MeshPrimitiveModel, transforms: Array<FloatArray>,
         skinningCommands: MutableList<Runnable>, vanillaRenderCommands: MutableList<Runnable>, shaderModRenderCommands: MutableList<Runnable>
     ) {
+        val attributes = meshPrimitiveModel.attributes
+        val positionsAccessorModel = attributes["POSITION"] ?: return
+        val renderCommand = mutableListOf<Runnable>()
+        if (attributes.containsKey("JOINTS_1")) {
+            processMeshPrimitiveModelSkinned(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, transforms, vanillaRenderCommands, shaderModRenderCommands)
+            return
+        }
+        val normalsAccessorModel = attributes["NORMAL"]
+        if (normalsAccessorModel != null) {
+            val tangentsAccessorModel = attributes["TANGENT"]
+            if (tangentsAccessorModel != null) {
+                processSkinnedIncludedTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands, attributes, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel)
+                addMaterialCommands(gltfRenderData, meshPrimitiveModel, vanillaRenderCommands, shaderModRenderCommands)
+            } else {
+                val materialModel = meshPrimitiveModel.materialModel
+                if (materialModel != null) {
+                    val renderedMaterial = obtainMaterial(gltfRenderData, materialModel)
+                    vanillaRenderCommands.add(renderedMaterial.vanillaMaterialCommand)
+                    shaderModRenderCommands.add(renderedMaterial.shaderModMaterialCommand)
+                    if (renderedMaterial.normalTexture != null) processSkinnedMikkTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands)
+                    else processSkinnedSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands, attributes, positionsAccessorModel, normalsAccessorModel)
+                } else {
+                    vanillaRenderCommands.add(vanillaDefaultMaterialCommand)
+                    shaderModRenderCommands.add(shaderModDefaultMaterialCommand)
+                    processSkinnedSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands, attributes, positionsAccessorModel, normalsAccessorModel)
+                }
+            }
+        } else {
+            val materialModel = meshPrimitiveModel.materialModel
+            if (materialModel != null) {
+                val renderedMaterial = obtainMaterial(gltfRenderData, materialModel)
+                vanillaRenderCommands.add(renderedMaterial.vanillaMaterialCommand)
+                shaderModRenderCommands.add(renderedMaterial.shaderModMaterialCommand)
+                if (renderedMaterial.normalTexture != null) processSkinnedFlatNormalMikkTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands)
+                else processSkinnedFlatNormalSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands)
+            } else {
+                vanillaRenderCommands.add(vanillaDefaultMaterialCommand)
+                shaderModRenderCommands.add(shaderModDefaultMaterialCommand)
+                processSkinnedFlatNormalSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, skinningCommands)
+            }
+        }
+        vanillaRenderCommands.addAll(renderCommand)
+        shaderModRenderCommands.addAll(renderCommand)
     }
     private fun processMeshPrimitiveModelSkinned(
         gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
         meshPrimitiveModel: MeshPrimitiveModel, transforms: Array<FloatArray>,
         vanillaRenderCommands: MutableList<Runnable>, shaderModRenderCommands: MutableList<Runnable>
     ) {
+        val attributes = meshPrimitiveModel.attributes
+        val positionsAccessorModel = attributes["POSITION"] ?: return
+        val renderCommand = mutableListOf<Runnable>()
+        val normalsAccessorModel = attributes["NORMAL"]
+        if (normalsAccessorModel != null) {
+            val tangentsAccessorModel = attributes["TANGENT"]
+            if (tangentsAccessorModel != null) {
+                processCpuSkinnedIncludedTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms, attributes, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel)
+                addMaterialCommands(gltfRenderData, meshPrimitiveModel, vanillaRenderCommands, shaderModRenderCommands)
+            } else {
+                val materialModel = meshPrimitiveModel.materialModel
+                if (materialModel != null) {
+                    val renderedMaterial = obtainMaterial(gltfRenderData, materialModel)
+                    vanillaRenderCommands.add(renderedMaterial.vanillaMaterialCommand)
+                    shaderModRenderCommands.add(renderedMaterial.shaderModMaterialCommand)
+                    if (renderedMaterial.normalTexture != null) processCpuSkinnedMikkTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms)
+                    else processCpuSkinnedSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms, attributes, positionsAccessorModel, normalsAccessorModel)
+                } else {
+                    vanillaRenderCommands.add(vanillaDefaultMaterialCommand)
+                    shaderModRenderCommands.add(shaderModDefaultMaterialCommand)
+                    processCpuSkinnedSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms, attributes, positionsAccessorModel, normalsAccessorModel)
+                }
+            }
+        } else {
+            val materialModel = meshPrimitiveModel.materialModel
+            if (materialModel != null) {
+                val renderedMaterial = obtainMaterial(gltfRenderData, materialModel)
+                vanillaRenderCommands.add(renderedMaterial.vanillaMaterialCommand)
+                shaderModRenderCommands.add(renderedMaterial.shaderModMaterialCommand)
+                if (renderedMaterial.normalTexture != null) processCpuSkinnedFlatNormalMikkTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms)
+                else processCpuSkinnedFlatNormalSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms)
+            } else {
+                vanillaRenderCommands.add(vanillaDefaultMaterialCommand)
+                shaderModRenderCommands.add(shaderModDefaultMaterialCommand)
+                processCpuSkinnedFlatNormalSimpleTangent(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, transforms)
+            }
+        }
+        vanillaRenderCommands.addAll(renderCommand)
+        shaderModRenderCommands.addAll(renderCommand)
+    }
+    private fun setupSkinningAttribs(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        morphTargets: List<Map<String, AccessorModel>>, skinningCommand: MutableList<Runnable>,
+        attributes: Map<String, AccessorModel>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel
+    ) {
+        val jointsAccessorModel = attributes["JOINTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, jointsAccessorModel.bufferViewModel)
+        setupVertexAttrib(jointsAccessorModel, skinning_joint)
+        val weightsAccessorModel = attributes["WEIGHTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
+        setupVertexAttrib(weightsAccessorModel, skinning_weight)
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, positionsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(positionsAccessorModel, skinning_position)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "NORMAL")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, normalsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(normalsAccessorModel, skinning_normal)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "TANGENT")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, tangentsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, tangentsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+    }
+    private fun createTFBuffersAndCommand(
+        gltfRenderData: MutableList<Runnable>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel,
+        glVertexArraySkinning: Int, skinningCommand: MutableList<Runnable>,
+        glTransformFeedback: Int
+    ): Triple<Int, Int, Int> {
+        val positionBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(positionBuffer) })
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, positionBuffer)
+        GL15.glBufferData(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, positionsAccessorModel.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        val normalBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(normalBuffer) })
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, normalBuffer)
+        GL15.glBufferData(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, normalsAccessorModel.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        val tangentBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(tangentBuffer) })
+        GL15.glBindBuffer(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, tangentBuffer)
+        GL15.glBufferData(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, tangentsAccessorModel.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        val pointCount = positionsAccessorModel.count
+        when (MCglTFSystem.glProfile) {
+            is GLProfile.GL43, is GLProfile.GL40 -> {
+                GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_position, positionBuffer)
+                GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_normal, normalBuffer)
+                GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_tangent, tangentBuffer)
+                skinningCommand.add(Runnable {
+                    GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, glTransformFeedback)
+                    GL30.glBeginTransformFeedback(GL11.GL_POINTS)
+                    GL30.glBindVertexArray(glVertexArraySkinning)
+                    GL11.glDrawArrays(GL11.GL_POINTS, 0, pointCount)
+                    GL30.glEndTransformFeedback()
+                })
+            }
+            is GLProfile.GL33 -> {
+                skinningCommand.add(Runnable {
+                    GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_position, positionBuffer)
+                    GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_normal, normalBuffer)
+                    GL30.glBindBufferBase(GL30.GL_TRANSFORM_FEEDBACK_BUFFER, skinning_out_tangent, tangentBuffer)
+                    GL30.glBeginTransformFeedback(GL11.GL_POINTS)
+                    GL30.glBindVertexArray(glVertexArraySkinning)
+                    GL11.glDrawArrays(GL11.GL_POINTS, 0, pointCount)
+                    GL30.glEndTransformFeedback()
+                })
+            }
+            is GLProfile.GL30 -> {}
+        }
+        return Triple(positionBuffer, normalBuffer, tangentBuffer)
+    }
+    private fun setupRenderVAOFromTF(
+        gltfRenderData: MutableList<Runnable>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel,
+        positionBuffer: Int, normalBuffer: Int, tangentBuffer: Int
+    ): Int {
+        val glVertexArray = GL30.glGenVertexArrays()
+        gltfRenderData.add(Runnable { GL30.glDeleteVertexArrays(glVertexArray) })
+        GL30.glBindVertexArray(glVertexArray)
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, positionBuffer)
+        GL20.glVertexAttribPointer(vaPosition, positionsAccessorModel.elementType.numComponents, positionsAccessorModel.componentType, false, 0, 0)
+        GL20.glEnableVertexAttribArray(vaPosition)
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, normalBuffer)
+        GL20.glVertexAttribPointer(vaNormal, normalsAccessorModel.elementType.numComponents, normalsAccessorModel.componentType, false, 0, 0)
+        GL20.glEnableVertexAttribArray(vaNormal)
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, tangentBuffer)
+        GL20.glVertexAttribPointer(at_tangent, tangentsAccessorModel.elementType.numComponents, tangentsAccessorModel.componentType, false, 0, 0)
+        GL20.glEnableVertexAttribArray(at_tangent)
+        return glVertexArray
+    }
+    private fun addSkinnedDrawCommand(
+        gltfRenderData: MutableList<Runnable>, meshPrimitiveModel: MeshPrimitiveModel,
+        pointCount: Int, glVertexArray: Int, glTransformFeedback: Int,
+        renderCommand: MutableList<Runnable>
+    ) {
+        val mode = meshPrimitiveModel.mode
+        val indices = meshPrimitiveModel.indices
+        if (indices != null) {
+            val glIndicesBufferView = obtainElementArrayBuffer(gltfRenderData, indices.bufferViewModel)
+            val count = indices.count
+            val type = indices.componentType
+            val offset = indices.byteOffset
+            renderCommand.add(Runnable {
+                GL30.glBindVertexArray(glVertexArray)
+                GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, glIndicesBufferView)
+                GL11.glDrawElements(mode, count, type, offset.toLong())
+            })
+        } else {
+            when (MCglTFSystem.glProfile) {
+                is GLProfile.GL43, is GLProfile.GL40 -> renderCommand.add(Runnable {
+                    GL30.glBindVertexArray(glVertexArray)
+                    GL40.glDrawTransformFeedback(mode, glTransformFeedback)
+                })
+                is GLProfile.GL33 -> renderCommand.add(Runnable {
+                    GL30.glBindVertexArray(glVertexArray)
+                    GL11.glDrawArrays(mode, 0, pointCount)
+                })
+                is GLProfile.GL30 -> {}
+            }
+        }
+    }
+    private fun beginSkinnedPrimitive(gltfRenderData: MutableList<Runnable>): Pair<Int, Int> {
+        val glTransformFeedback: Int
+        when (MCglTFSystem.glProfile) {
+            is GLProfile.GL43, is GLProfile.GL40 -> {
+                glTransformFeedback = GL40.glGenTransformFeedbacks()
+                gltfRenderData.add(Runnable { GL40.glDeleteTransformFeedbacks(glTransformFeedback) })
+                GL40.glBindTransformFeedback(GL40.GL_TRANSFORM_FEEDBACK, glTransformFeedback)
+            }
+            else -> glTransformFeedback = -1
+        }
+        val glVertexArraySkinning = GL30.glGenVertexArrays()
+        gltfRenderData.add(Runnable { GL30.glDeleteVertexArrays(glVertexArraySkinning) })
+        GL30.glBindVertexArray(glVertexArraySkinning)
+        return Pair(glTransformFeedback, glVertexArraySkinning)
+    }
+    private fun processSkinnedIncludedTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        skinningCommand: MutableList<Runnable>, attributes: Map<String, AccessorModel>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel
+    ) {
+        val (glTransformFeedback, glVertexArraySkinning) = beginSkinnedPrimitive(gltfRenderData)
+        val morphTargets = meshPrimitiveModel.targets
+        setupSkinningAttribs(gltfRenderData, nodeModel, meshModel, morphTargets, skinningCommand, attributes, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel)
+        val (positionBuffer, normalBuffer, tangentBuffer) = createTFBuffersAndCommand(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, glVertexArraySkinning, skinningCommand, glTransformFeedback)
+        val glVertexArray = setupRenderVAOFromTF(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionBuffer, normalBuffer, tangentBuffer)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addSkinnedDrawCommand(gltfRenderData, meshPrimitiveModel, positionsAccessorModel.count, glVertexArray, glTransformFeedback, renderCommand)
+    }
+    private fun processSkinnedSimpleTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        skinningCommand: MutableList<Runnable>, attributes: Map<String, AccessorModel>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel
+    ) {
+        val (glTransformFeedback, glVertexArraySkinning) = beginSkinnedPrimitive(gltfRenderData)
+        val morphTargets = meshPrimitiveModel.targets
+        val jointsAccessorModel = attributes["JOINTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, jointsAccessorModel.bufferViewModel)
+        setupVertexAttrib(jointsAccessorModel, skinning_joint)
+        val weightsAccessorModel = attributes["WEIGHTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
+        setupVertexAttrib(weightsAccessorModel, skinning_weight)
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, positionsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(positionsAccessorModel, skinning_position)
+        val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
+            setupVertexAttrib(normalsAccessorModel, skinning_normal)
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, tangentsAccessorModel, tangentTargetAccessorDatas)
+            setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, normalsAccessorModel.bufferViewModel)
+            setupVertexAttrib(normalsAccessorModel, skinning_normal)
+            bindArrayBufferViewModel(gltfRenderData, tangentsAccessorModel.bufferViewModel)
+            setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        }
+        val (positionBuffer, normalBuffer, tangentBuffer) = createTFBuffersAndCommand(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, glVertexArraySkinning, skinningCommand, glTransformFeedback)
+        val glVertexArray = setupRenderVAOFromTF(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionBuffer, normalBuffer, tangentBuffer)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addSkinnedDrawCommand(gltfRenderData, meshPrimitiveModel, positionsAccessorModel.count, glVertexArray, glTransformFeedback, renderCommand)
+    }
+    private fun processSkinnedMikkTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        skinningCommand: MutableList<Runnable>
+    ) {
+        val (glTransformFeedback, glVertexArraySkinning) = beginSkinnedPrimitive(gltfRenderData)
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val jointsAccessorModel = attributes["JOINTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, jointsAccessorModel.bufferViewModel)
+        setupVertexAttrib(jointsAccessorModel, skinning_joint)
+        val weightsAccessorModel = attributes["WEIGHTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
+        setupVertexAttrib(weightsAccessorModel, skinning_weight)
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, positionsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(positionsAccessorModel, skinning_position)
+        val normalsAccessorModel = attributes["NORMAL"]!!
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "NORMAL")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, normalsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(normalsAccessorModel, skinning_normal)
+        val texcoordsAccessorModel = attributes["TEXCOORD_0"]
+        val tangentsAccessorModel = obtainTangentsAccessorModel(meshPrimitiveModel, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (texcoordsAccessorModel != null && createTangentMorphTarget(morphTargets, targetAccessorDatas, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel, "TEXCOORD_0", tangentsAccessorModel)) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, tangentsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, tangentsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        val (positionBuffer, normalBuffer, tangentBuffer) = createTFBuffersAndCommand(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, glVertexArraySkinning, skinningCommand, glTransformFeedback)
+        val glVertexArray = setupRenderVAOFromTF(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionBuffer, normalBuffer, tangentBuffer)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addSkinnedDrawCommand(gltfRenderData, meshPrimitiveModel, positionsAccessorModel.count, glVertexArray, glTransformFeedback, renderCommand)
+    }
+    private fun processSkinnedFlatNormalSimpleTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        skinningCommand: MutableList<Runnable>
+    ) {
+        val (glTransformFeedback, glVertexArraySkinning) = beginSkinnedPrimitive(gltfRenderData)
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val jointsAccessorModel = attributes["JOINTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, jointsAccessorModel.bufferViewModel)
+        setupVertexAttrib(jointsAccessorModel, skinning_joint)
+        val weightsAccessorModel = attributes["WEIGHTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
+        setupVertexAttrib(weightsAccessorModel, skinning_weight)
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, positionsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(positionsAccessorModel, skinning_position)
+        val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
+        val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
+            setupVertexAttrib(normalsAccessorModel, skinning_normal)
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, tangentsAccessorModel, tangentTargetAccessorDatas)
+            setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, normalsAccessorModel.bufferViewModel)
+            setupVertexAttrib(normalsAccessorModel, skinning_normal)
+            bindArrayBufferViewModel(gltfRenderData, tangentsAccessorModel.bufferViewModel)
+            setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        }
+        val (positionBuffer, normalBuffer, tangentBuffer) = createTFBuffersAndCommand(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, glVertexArraySkinning, skinningCommand, glTransformFeedback)
+        val glVertexArray = setupRenderVAOFromTF(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionBuffer, normalBuffer, tangentBuffer)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addSkinnedDrawCommand(gltfRenderData, meshPrimitiveModel, positionsAccessorModel.count, glVertexArray, glTransformFeedback, renderCommand)
+    }
+    private fun processSkinnedFlatNormalMikkTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        skinningCommand: MutableList<Runnable>
+    ) {
+        val (glTransformFeedback, glVertexArraySkinning) = beginSkinnedPrimitive(gltfRenderData)
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val jointsAccessorModel = attributes["JOINTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, jointsAccessorModel.bufferViewModel)
+        setupVertexAttrib(jointsAccessorModel, skinning_joint)
+        val weightsAccessorModel = attributes["WEIGHTS_0"]!!
+        bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
+        setupVertexAttrib(weightsAccessorModel, skinning_weight)
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, positionsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(positionsAccessorModel, skinning_position)
+        val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (createMorphTarget(morphTargets, targetAccessorDatas, "NORMAL")) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, normalsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(normalsAccessorModel, skinning_normal)
+        val texcoordsAccessorModel = attributes["TEXCOORD_0"]
+        val tangentsAccessorModel = obtainTangentsAccessorModel(meshPrimitiveModel, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        if (texcoordsAccessorModel != null && createTangentMorphTarget(morphTargets, targetAccessorDatas, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel, "TEXCOORD_0", tangentsAccessorModel)) {
+            bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, tangentsAccessorModel, targetAccessorDatas)
+        } else {
+            bindArrayBufferViewModel(gltfRenderData, tangentsAccessorModel.bufferViewModel)
+        }
+        setupVertexAttrib(tangentsAccessorModel, skinning_tangent)
+        val (positionBuffer, normalBuffer, tangentBuffer) = createTFBuffersAndCommand(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, glVertexArraySkinning, skinningCommand, glTransformFeedback)
+        val glVertexArray = setupRenderVAOFromTF(gltfRenderData, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionBuffer, normalBuffer, tangentBuffer)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addSkinnedDrawCommand(gltfRenderData, meshPrimitiveModel, positionsAccessorModel.count, glVertexArray, glTransformFeedback, renderCommand)
     }
     fun processMeshPrimitiveModel(
         gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
@@ -1094,5 +1509,440 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         })
         GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, glBuffer)
         return morphedModel
+    }
+    fun obtainUnsignedJointsModel(accessorModel: AccessorModel): AccessorModel {
+        return jointsAccessorModelUnsignedLookup.getOrPut(accessorModel) {
+            val count = accessorModel.count
+            val unsignedModel = createAccessorModel(GL11.GL_INT, count, ElementType.VEC4, "unsignedJoints")
+            val unsignedData = AccessorDatas.create(unsignedModel) as AccessorIntData
+            if (accessorModel.componentDataType == Short::class.javaPrimitiveType) {
+                val srcData = AccessorDatas.create(accessorModel) as AccessorShortData
+                for (i in 0 until count) {
+                    for (c in 0 until 4) unsignedData.set(i, c, java.lang.Short.toUnsignedInt(srcData.get(i, c)))
+                }
+            } else {
+                val srcData = AccessorDatas.create(accessorModel) as AccessorByteData
+                for (i in 0 until count) {
+                    for (c in 0 until 4) unsignedData.set(i, c, java.lang.Byte.toUnsignedInt(srcData.get(i, c)))
+                }
+            }
+            unsignedModel
+        }
+    }
+    fun obtainDequantizedWeightsModel(accessorModel: AccessorModel): AccessorModel {
+        if (accessorModel.componentDataType == Float::class.javaPrimitiveType) return accessorModel
+        return weightsAccessorModelDequantizedLookup.getOrPut(accessorModel) {
+            val count = accessorModel.count
+            val dequantizedModel = createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC4, "dequantizedWeights")
+            val dstData = AccessorDatas.createFloat(dequantizedModel)
+            if (accessorModel.componentDataType == Short::class.javaPrimitiveType) {
+                val srcData = AccessorDatas.create(accessorModel) as AccessorShortData
+                for (i in 0 until count) {
+                    for (c in 0 until 4) dstData.set(i, c, java.lang.Short.toUnsignedInt(srcData.get(i, c)) / 65535.0f)
+                }
+            } else {
+                val srcData = AccessorDatas.create(accessorModel) as AccessorByteData
+                for (i in 0 until count) {
+                    for (c in 0 until 4) dstData.set(i, c, java.lang.Byte.toUnsignedInt(srcData.get(i, c)) / 255.0f)
+                }
+            }
+            dequantizedModel
+        }
+    }
+    fun obtainVec3FloatMorphedModel(
+        nodeModel: NodeModel, meshModel: MeshModel, command: MutableList<Runnable>,
+        baseAccessorModel: AccessorModel, targetAccessorDatas: List<AccessorFloatData?>
+    ): AccessorModel {
+        val morphedModel = AccessorModelCreation.instantiate(baseAccessorModel, "")
+        val baseData = AccessorDatas.createFloat(baseAccessorModel)
+        val morphedData = AccessorDatas.createFloat(morphedModel)
+        val weights = FloatArray(targetAccessorDatas.size)
+        val numElements = morphedData.numElements
+        val morphingCommands = ArrayList<Runnable>(numElements * 3)
+        for (e in 0 until numElements) {
+            for (c in 0 until 3) {
+                morphingCommands.add(Runnable {
+                    var r = baseData.get(e, c)
+                    for (i in weights.indices) {
+                        val target = targetAccessorDatas[i]
+                        if (target != null) r += weights[i] * target.get(e, c)
+                    }
+                    morphedData.set(e, c, r)
+                })
+            }
+        }
+        command.add(Runnable {
+            val nodeWeights = nodeModel.weights
+            val meshWeights = meshModel.weights
+            if (nodeWeights != null) System.arraycopy(nodeWeights, 0, weights, 0, weights.size)
+            else if (meshWeights != null) System.arraycopy(meshWeights, 0, weights, 0, weights.size)
+            morphingCommands.parallelStream().forEach(Runnable::run)
+        })
+        return morphedModel
+    }
+    fun createSoftwareSkinningCommands(
+        pointCount: Int, jointMatrices: Array<FloatArray>, attributes: Map<String, AccessorModel>,
+        inputPositions: AccessorFloatData, inputNormals: AccessorFloatData, inputTangents: AccessorFloatData,
+        outputPositions: AccessorFloatData, outputNormals: AccessorFloatData, outputTangents: AccessorFloatData
+    ): List<Runnable> {
+        var skinningAttributeCount = 0
+        for (name in attributes.keys) { if (name.startsWith("JOINTS_")) skinningAttributeCount++ }
+        val jointsAccessorDatas = arrayOfNulls<AccessorIntData>(skinningAttributeCount)
+        val weightsAccessorDatas = arrayOfNulls<AccessorFloatData>(skinningAttributeCount)
+        attributes.forEach { (name, attribute) ->
+            if (name.startsWith("JOINTS_")) jointsAccessorDatas[name.substring("JOINTS_".length).toInt()] = AccessorDatas.create(obtainUnsignedJointsModel(attribute)) as AccessorIntData
+            else if (name.startsWith("WEIGHTS_")) weightsAccessorDatas[name.substring("WEIGHTS_".length).toInt()] = AccessorDatas.createFloat(obtainDequantizedWeightsModel(attribute))
+        }
+        return (0 until pointCount).map { p ->
+            Runnable {
+                var sm00 = 0f; var sm01 = 0f; var sm02 = 0f; var sm03 = 0f
+                var sm10 = 0f; var sm11 = 0f; var sm12 = 0f; var sm13 = 0f
+                var sm20 = 0f; var sm21 = 0f; var sm22 = 0f; var sm23 = 0f
+                for (i in jointsAccessorDatas.indices) {
+                    val jd = jointsAccessorDatas[i]!!
+                    val jmx = jointMatrices[jd.get(p, 0)]
+                    val jmy = jointMatrices[jd.get(p, 1)]
+                    val jmz = jointMatrices[jd.get(p, 2)]
+                    val jmw = jointMatrices[jd.get(p, 3)]
+                    val wd = weightsAccessorDatas[i]!!
+                    val wx = wd.get(p, 0); val wy = wd.get(p, 1); val wz = wd.get(p, 2); val ww = wd.get(p, 3)
+                    sm00 += wx * jmx[0] + wy * jmy[0] + wz * jmz[0] + ww * jmw[0]
+                    sm01 += wx * jmx[4] + wy * jmy[4] + wz * jmz[4] + ww * jmw[4]
+                    sm02 += wx * jmx[8] + wy * jmy[8] + wz * jmz[8] + ww * jmw[8]
+                    sm03 += wx * jmx[12] + wy * jmy[12] + wz * jmz[12] + ww * jmw[12]
+                    sm10 += wx * jmx[1] + wy * jmy[1] + wz * jmz[1] + ww * jmw[1]
+                    sm11 += wx * jmx[5] + wy * jmy[5] + wz * jmz[5] + ww * jmw[5]
+                    sm12 += wx * jmx[9] + wy * jmy[9] + wz * jmz[9] + ww * jmw[9]
+                    sm13 += wx * jmx[13] + wy * jmy[13] + wz * jmz[13] + ww * jmw[13]
+                    sm20 += wx * jmx[2] + wy * jmy[2] + wz * jmz[2] + ww * jmw[2]
+                    sm21 += wx * jmx[6] + wy * jmy[6] + wz * jmz[6] + ww * jmw[6]
+                    sm22 += wx * jmx[10] + wy * jmy[10] + wz * jmz[10] + ww * jmw[10]
+                    sm23 += wx * jmx[14] + wy * jmy[14] + wz * jmz[14] + ww * jmw[14]
+                }
+                val px = inputPositions.get(p, 0); val py = inputPositions.get(p, 1); val pz = inputPositions.get(p, 2)
+                outputPositions.set(p, 0, sm00 * px + sm01 * py + sm02 * pz + sm03)
+                outputPositions.set(p, 1, sm10 * px + sm11 * py + sm12 * pz + sm13)
+                outputPositions.set(p, 2, sm20 * px + sm21 * py + sm22 * pz + sm23)
+                val nx = inputNormals.get(p, 0); val ny = inputNormals.get(p, 1); val nz = inputNormals.get(p, 2)
+                outputNormals.set(p, 0, sm00 * nx + sm01 * ny + sm02 * nz)
+                outputNormals.set(p, 1, sm10 * nx + sm11 * ny + sm12 * nz)
+                outputNormals.set(p, 2, sm20 * nx + sm21 * ny + sm22 * nz)
+                val tx = inputTangents.get(p, 0); val ty = inputTangents.get(p, 1); val tz = inputTangents.get(p, 2)
+                outputTangents.set(p, 0, sm00 * tx + sm01 * ty + sm02 * tz)
+                outputTangents.set(p, 1, sm10 * tx + sm11 * ty + sm12 * tz)
+                outputTangents.set(p, 2, sm20 * tx + sm21 * ty + sm22 * tz)
+            }
+        }
+    }
+    private data class CpuSkinningBuffers(val glVertexArray: Int, val positionBuffer: Int, val normalBuffer: Int, val tangentBuffer: Int)
+    private fun setupCpuSkinningBuffers(
+        gltfRenderData: MutableList<Runnable>,
+        outputPositions: AccessorModel, outputNormals: AccessorModel, outputTangents: AccessorModel
+    ): CpuSkinningBuffers {
+        val glVertexArray = GL30.glGenVertexArrays()
+        gltfRenderData.add(Runnable { GL30.glDeleteVertexArrays(glVertexArray) })
+        GL30.glBindVertexArray(glVertexArray)
+        val positionBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(positionBuffer) })
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, positionBuffer)
+        GL15.glBufferData(GL15.GL_ARRAY_BUFFER, outputPositions.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        setupVertexAttrib(outputPositions, vaPosition)
+        val normalBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(normalBuffer) })
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, normalBuffer)
+        GL15.glBufferData(GL15.GL_ARRAY_BUFFER, outputNormals.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        setupVertexAttrib(outputNormals, vaNormal)
+        val tangentBuffer = GL15.glGenBuffers()
+        gltfRenderData.add(Runnable { GL15.glDeleteBuffers(tangentBuffer) })
+        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, tangentBuffer)
+        GL15.glBufferData(GL15.GL_ARRAY_BUFFER, outputTangents.bufferViewModel.byteLength.toLong(), GL15.GL_STATIC_DRAW)
+        setupVertexAttrib(outputTangents, at_tangent)
+        return CpuSkinningBuffers(glVertexArray, positionBuffer, normalBuffer, tangentBuffer)
+    }
+    private fun addCpuSkinningDrawCommand(
+        gltfRenderData: MutableList<Runnable>, meshPrimitiveModel: MeshPrimitiveModel,
+        outputPositions: AccessorModel, outputNormals: AccessorModel, outputTangents: AccessorModel,
+        buffers: CpuSkinningBuffers, skinningCommands: List<Runnable>, renderCommand: MutableList<Runnable>
+    ) {
+        val positionsBufferViewData = outputPositions.bufferViewModel.bufferViewData
+        val normalsBufferViewData = outputNormals.bufferViewModel.bufferViewData
+        val tangentsBufferViewData = outputTangents.bufferViewModel.bufferViewData
+        val glVertexArray = buffers.glVertexArray
+        val positionBuffer = buffers.positionBuffer
+        val normalBuffer = buffers.normalBuffer
+        val tangentBuffer = buffers.tangentBuffer
+        val mode = meshPrimitiveModel.mode
+        val indices = meshPrimitiveModel.indices
+        if (indices != null) {
+            val glIndicesBufferView = obtainElementArrayBuffer(gltfRenderData, indices.bufferViewModel)
+            val count = indices.count
+            val type = indices.componentType
+            val offset = indices.byteOffset
+            renderCommand.add(Runnable {
+                skinningCommands.parallelStream().forEach(Runnable::run)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, positionBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, positionsBufferViewData)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, normalBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, normalsBufferViewData)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, tangentBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, tangentsBufferViewData)
+                GL30.glBindVertexArray(glVertexArray)
+                GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, glIndicesBufferView)
+                GL11.glDrawElements(mode, count, type, offset.toLong())
+            })
+        } else {
+            val pointCount = outputPositions.count
+            renderCommand.add(Runnable {
+                skinningCommands.parallelStream().forEach(Runnable::run)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, positionBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, positionsBufferViewData)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, normalBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, normalsBufferViewData)
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, tangentBuffer)
+                GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, 0, tangentsBufferViewData)
+                GL30.glBindVertexArray(glVertexArray)
+                GL11.glDrawArrays(mode, 0, pointCount)
+            })
+        }
+    }
+    private fun processCpuSkinnedIncludedTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        jointMatrices: Array<FloatArray>, attributes: Map<String, AccessorModel>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel
+    ) {
+        val morphTargets = meshPrimitiveModel.targets
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(positionsAccessorModel, "")
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val outputNormals = if (createMorphTarget(morphTargets, targetAccessorDatas, "NORMAL"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, normalsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(normalsAccessorModel, "")
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val outputTangents = if (createMorphTarget(morphTargets, targetAccessorDatas, "TANGENT"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, tangentsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(tangentsAccessorModel, "")
+        val skinningCommands = createSoftwareSkinningCommands(positionsAccessorModel.count, jointMatrices, attributes,
+            AccessorDatas.createFloat(positionsAccessorModel), AccessorDatas.createFloat(normalsAccessorModel), AccessorDatas.createFloat(tangentsAccessorModel),
+            AccessorDatas.createFloat(outputPositions), AccessorDatas.createFloat(outputNormals), AccessorDatas.createFloat(outputTangents))
+        val buffers = setupCpuSkinningBuffers(gltfRenderData, outputPositions, outputNormals, outputTangents)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addCpuSkinningDrawCommand(gltfRenderData, meshPrimitiveModel, outputPositions, outputNormals, outputTangents, buffers, skinningCommands, renderCommand)
+    }
+    private fun processCpuSkinnedSimpleTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        jointMatrices: Array<FloatArray>, attributes: Map<String, AccessorModel>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel
+    ) {
+        val morphTargets = meshPrimitiveModel.targets
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(positionsAccessorModel, "")
+        val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputNormals: AccessorModel
+        val outputTangents: AccessorModel
+        if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
+            outputNormals = obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, normalsAccessorModel, targetAccessorDatas)
+            outputTangents = obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, tangentsAccessorModel, tangentTargetAccessorDatas)
+        } else {
+            outputNormals = AccessorModelCreation.instantiate(normalsAccessorModel, "")
+            outputTangents = AccessorModelCreation.instantiate(tangentsAccessorModel, "")
+        }
+        val skinningCommands = createSoftwareSkinningCommands(positionsAccessorModel.count, jointMatrices, attributes,
+            AccessorDatas.createFloat(positionsAccessorModel), AccessorDatas.createFloat(normalsAccessorModel), AccessorDatas.createFloat(tangentsAccessorModel),
+            AccessorDatas.createFloat(outputPositions), AccessorDatas.createFloat(outputNormals), AccessorDatas.createFloat(outputTangents))
+        val buffers = setupCpuSkinningBuffers(gltfRenderData, outputPositions, outputNormals, outputTangents)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addCpuSkinningDrawCommand(gltfRenderData, meshPrimitiveModel, outputPositions, outputNormals, outputTangents, buffers, skinningCommands, renderCommand)
+    }
+    private fun processCpuSkinnedMikkTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        jointMatrices: Array<FloatArray>
+    ) {
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(positionsAccessorModel, "")
+        val normalsAccessorModel = attributes["NORMAL"]!!
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val outputNormals = if (createMorphTarget(morphTargets, targetAccessorDatas, "NORMAL"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, normalsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(normalsAccessorModel, "")
+        val texcoordsAccessorModel = attributes["TEXCOORD_0"]
+        val tangentsAccessorModel = obtainTangentsAccessorModel(meshPrimitiveModel, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val outputTangents = if (texcoordsAccessorModel != null && createTangentMorphTarget(morphTargets, targetAccessorDatas, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel, "TEXCOORD_0", tangentsAccessorModel))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, tangentsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(tangentsAccessorModel, "")
+        val skinningCommands = createSoftwareSkinningCommands(positionsAccessorModel.count, jointMatrices, attributes,
+            AccessorDatas.createFloat(positionsAccessorModel), AccessorDatas.createFloat(normalsAccessorModel), AccessorDatas.createFloat(tangentsAccessorModel),
+            AccessorDatas.createFloat(outputPositions), AccessorDatas.createFloat(outputNormals), AccessorDatas.createFloat(outputTangents))
+        val buffers = setupCpuSkinningBuffers(gltfRenderData, outputPositions, outputNormals, outputTangents)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addCpuSkinningDrawCommand(gltfRenderData, meshPrimitiveModel, outputPositions, outputNormals, outputTangents, buffers, skinningCommands, renderCommand)
+    }
+    private fun processCpuSkinnedFlatNormalSimpleTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        jointMatrices: Array<FloatArray>
+    ) {
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(positionsAccessorModel, "")
+        val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
+        val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
+        val positionTargetDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
+        val normalTargetDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
+        val tangentTargetDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
+        val outputNormals: AccessorModel
+        val outputTangents: AccessorModel
+        if (createPositionNormalTangentMorphTarget(morphTargets, positionsAccessorModel, normalsAccessorModel, tangentsAccessorModel, positionTargetDatas, normalTargetDatas, tangentTargetDatas)) {
+            outputNormals = obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, normalsAccessorModel, normalTargetDatas)
+            outputTangents = obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, tangentsAccessorModel, tangentTargetDatas)
+        } else {
+            outputNormals = AccessorModelCreation.instantiate(normalsAccessorModel, "")
+            outputTangents = AccessorModelCreation.instantiate(tangentsAccessorModel, "")
+        }
+        val skinningCommands = createSoftwareSkinningCommands(positionsAccessorModel.count, jointMatrices, attributes,
+            AccessorDatas.createFloat(positionsAccessorModel), AccessorDatas.createFloat(normalsAccessorModel), AccessorDatas.createFloat(tangentsAccessorModel),
+            AccessorDatas.createFloat(outputPositions), AccessorDatas.createFloat(outputNormals), AccessorDatas.createFloat(outputTangents))
+        val buffers = setupCpuSkinningBuffers(gltfRenderData, outputPositions, outputNormals, outputTangents)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addCpuSkinningDrawCommand(gltfRenderData, meshPrimitiveModel, outputPositions, outputNormals, outputTangents, buffers, skinningCommands, renderCommand)
+    }
+    private fun processCpuSkinnedFlatNormalMikkTangent(
+        gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
+        meshPrimitiveModel: MeshPrimitiveModel, renderCommand: MutableList<Runnable>,
+        jointMatrices: Array<FloatArray>
+    ) {
+        val unindexed = obtainUnindexed(meshPrimitiveModel)
+        val attributes = unindexed.first
+        val morphTargets = unindexed.second
+        val positionsAccessorModel = attributes["POSITION"]!!
+        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(positionsAccessorModel, "")
+        val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
+        val positionTargetDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
+        val normalTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
+        val outputNormals = if (createPositionNormalMorphTarget(morphTargets, positionsAccessorModel, normalsAccessorModel, positionTargetDatas, normalTargetAccessorDatas))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, normalsAccessorModel, normalTargetAccessorDatas)
+        else AccessorModelCreation.instantiate(normalsAccessorModel, "")
+        val texcoordsAccessorModel = attributes["TEXCOORD_0"]
+        val tangentsAccessorModel = obtainTangentsAccessorModel(meshPrimitiveModel, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel)
+        targetAccessorDatas = ArrayList(morphTargets.size)
+        val outputTangents = if (texcoordsAccessorModel != null && createTangentMorphTarget(morphTargets, targetAccessorDatas, positionsAccessorModel, normalsAccessorModel, texcoordsAccessorModel, "TEXCOORD_0", tangentsAccessorModel))
+            obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, tangentsAccessorModel, targetAccessorDatas)
+        else AccessorModelCreation.instantiate(tangentsAccessorModel, "")
+        val skinningCommands = createSoftwareSkinningCommands(positionsAccessorModel.count, jointMatrices, attributes,
+            AccessorDatas.createFloat(positionsAccessorModel), AccessorDatas.createFloat(normalsAccessorModel), AccessorDatas.createFloat(tangentsAccessorModel),
+            AccessorDatas.createFloat(outputPositions), AccessorDatas.createFloat(outputNormals), AccessorDatas.createFloat(outputTangents))
+        val buffers = setupCpuSkinningBuffers(gltfRenderData, outputPositions, outputNormals, outputTangents)
+        bindColorAndTexcoord(gltfRenderData, nodeModel, meshModel, meshPrimitiveModel, renderCommand, attributes, morphTargets)
+        addCpuSkinningDrawCommand(gltfRenderData, meshPrimitiveModel, outputPositions, outputNormals, outputTangents, buffers, skinningCommands, renderCommand)
+    }
+    fun createPositionNormalMorphTarget(
+        morphTargets: List<Map<String, AccessorModel>>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel,
+        positionTargetDatas: MutableList<AccessorFloatData?>, normalTargetDatas: MutableList<AccessorFloatData?>
+    ): Boolean {
+        var found = false
+        val count = positionsAccessorModel.count
+        val numTriangles = count / 3
+        val positionsData = AccessorDatas.createFloat(positionsAccessorModel)
+        val normalsData = AccessorDatas.createFloat(normalsAccessorModel)
+        for (morphTarget in morphTargets) {
+            val accessor = morphTarget["POSITION"]
+            if (accessor != null) {
+                found = true
+                val deltaPositions = AccessorDatas.createFloat(accessor)
+                positionTargetDatas.add(deltaPositions)
+                val normalTarget = createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC3, "")
+                val normalTargetData = normalTarget.accessorData as AccessorFloatData
+                normalTargetDatas.add(normalTargetData)
+                val v0 = FloatArray(3); val v1 = FloatArray(3); val v2 = FloatArray(3)
+                val e01 = FloatArray(3); val e02 = FloatArray(3); val cross = FloatArray(3)
+                val n0 = FloatArray(3); val n1 = FloatArray(3)
+                for (i in 0 until numTriangles) {
+                    val i0 = i * 3; val i1 = i0 + 1; val i2 = i0 + 2
+                    for (c in 0 until 3) { v0[c] = positionsData.get(i0, c) + deltaPositions.get(i0, c); v1[c] = positionsData.get(i1, c) + deltaPositions.get(i1, c); v2[c] = positionsData.get(i2, c) + deltaPositions.get(i2, c) }
+                    for (c in 0 until 3) n0[c] = normalsData.get(i0, c)
+                    VecMath.subtract(v1, v0, e01); VecMath.subtract(v2, v0, e02)
+                    VecMath.cross(e01, e02, cross); VecMath.normalize(cross, n1)
+                    VecMath.subtract(n1, n0, n1)
+                    for (v in i0..i2) { normalTargetData.set(v, 0, n1[0]); normalTargetData.set(v, 1, n1[1]); normalTargetData.set(v, 2, n1[2]) }
+                }
+            } else {
+                positionTargetDatas.add(null)
+                normalTargetDatas.add(null)
+            }
+        }
+        return found
+    }
+    fun createPositionNormalTangentMorphTarget(
+        morphTargets: List<Map<String, AccessorModel>>,
+        positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel,
+        positionTargetDatas: MutableList<AccessorFloatData?>, normalTargetDatas: MutableList<AccessorFloatData?>, tangentTargetDatas: MutableList<AccessorFloatData?>
+    ): Boolean {
+        var found = false
+        val count = positionsAccessorModel.count
+        val numTriangles = count / 3
+        val positionsData = AccessorDatas.createFloat(positionsAccessorModel)
+        val normalsData = AccessorDatas.createFloat(normalsAccessorModel)
+        val tangentsData = AccessorDatas.createFloat(tangentsAccessorModel)
+        for (morphTarget in morphTargets) {
+            val accessor = morphTarget["POSITION"]
+            if (accessor != null) {
+                found = true
+                val deltaPositions = AccessorDatas.createFloat(accessor)
+                positionTargetDatas.add(deltaPositions)
+                val normalTarget = createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC3, "")
+                val normalTargetData = normalTarget.accessorData as AccessorFloatData
+                normalTargetDatas.add(normalTargetData)
+                val tangentTarget = createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC3, "")
+                val tangentTargetData = tangentTarget.accessorData as AccessorFloatData
+                tangentTargetDatas.add(tangentTargetData)
+                val v0 = FloatArray(3); val v1 = FloatArray(3); val v2 = FloatArray(3)
+                val e01 = FloatArray(3); val e02 = FloatArray(3); val cross = FloatArray(3)
+                val n0 = FloatArray(3); val n1 = FloatArray(3); val n2 = FloatArray(3)
+                val t0 = FloatArray(3); val t1 = FloatArray(3)
+                for (i in 0 until numTriangles) {
+                    val i0 = i * 3; val i1 = i0 + 1; val i2 = i0 + 2
+                    for (c in 0 until 3) { v0[c] = positionsData.get(i0, c) + deltaPositions.get(i0, c); v1[c] = positionsData.get(i1, c) + deltaPositions.get(i1, c); v2[c] = positionsData.get(i2, c) + deltaPositions.get(i2, c) }
+                    for (c in 0 until 3) { n0[c] = normalsData.get(i0, c); t0[c] = tangentsData.get(i0, c) }
+                    VecMath.subtract(v1, v0, e01); VecMath.subtract(v2, v0, e02)
+                    VecMath.cross(e01, e02, cross); VecMath.normalize(cross, n1)
+                    n2[0] = -n1[2]; n2[1] = n1[0]; n2[2] = n1[1]
+                    VecMath.cross(n1, n2, cross); VecMath.normalize(cross, t1)
+                    VecMath.subtract(n1, n0, n1); VecMath.subtract(t1, t0, t1)
+                    for (v in i0..i2) {
+                        normalTargetData.set(v, 0, n1[0]); normalTargetData.set(v, 1, n1[1]); normalTargetData.set(v, 2, n1[2])
+                        tangentTargetData.set(v, 0, t1[0]); tangentTargetData.set(v, 1, t1[1]); tangentTargetData.set(v, 2, t1[2])
+                    }
+                }
+            } else {
+                positionTargetDatas.add(null)
+                normalTargetDatas.add(null)
+                tangentTargetDatas.add(null)
+            }
+        }
+        return found
     }
 }
