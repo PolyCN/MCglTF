@@ -1,4 +1,8 @@
 package com.poly.mcgltf.config
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
@@ -6,10 +10,7 @@ import java.nio.file.WatchService
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
-import org.slf4j.LoggerFactory
+
 @Serializable
 enum class PerformanceProfile {
     LOW, MEDIUM, HIGH, ULTRA;

@@ -1,10 +1,7 @@
 package com.poly.mcgltf
-import de.javagl.jgltf.model.AccessorByteData
-import de.javagl.jgltf.model.AccessorData
-import de.javagl.jgltf.model.AccessorFloatData
-import de.javagl.jgltf.model.AccessorIntData
-import de.javagl.jgltf.model.AccessorShortData
+import de.javagl.jgltf.model.*
 import kotlin.math.min
+
 object AccessorDataUtils {
     fun readInts(accessorData: AccessorData): IntArray {
         val n = accessorData.numElements
