@@ -1,0 +1,34 @@
+{
+	"schemaVersion": 1,
+	"id": "mcgltf",
+	"version": "${version}",
+	"name": "MCglTF",
+	"description": "Load and render glTF 2.0 3D models in Minecraft with skeletal animation, PBR materials, morph targets, and Iris shader compatibility.",
+	"authors": [
+		"Poly"
+	],
+	"license": "MIT",
+	"icon": "assets/mcgltf/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			{
+				"value": "com.poly.mcgltf.MCglTFSystem",
+				"adapter": "kotlin"
+			}
+		]
+	},
+	"mixins": [
+		"mcgltf.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.18.4",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*",
+		"fabric-language-kotlin": "*"
+	},
+	"suggests": {
+		"iris": "*"
+	}
+}
