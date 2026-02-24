@@ -1,0 +1,12 @@
+{
+	"required": false,
+	"package": "com.poly.mcgltf.iris.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"plugin": "com.poly.mcgltf.iris.mixin.IrisCompatMixinPlugin",
+	"client": [
+		"MixinRenderType"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

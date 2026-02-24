@@ -17,7 +17,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.*
 
-class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: MutableList<RenderedGltfScene> = mutableListOf()) {
+open class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: MutableList<RenderedGltfScene> = mutableListOf()) {
     companion object {
         const val mc_midTexCoord = 12
         const val at_tangent = 13
@@ -54,7 +54,27 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
             GL20.glVertexAttrib4f(vaColor, 1.0f, 1.0f, 1.0f, 1.0f)
             GL11.glEnable(GL11.GL_CULL_FACE)
         }
-        @JvmField val shaderModDefaultMaterialCommand = Runnable {
+        @JvmField val shaderModDefaultMaterialCommand: Runnable = if (MCglTFSystem.isIrisLoaded()) Runnable {
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, MCglTFSystem.defaultColorMap)
+            val currentProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM)
+            val normalMapLocation = GL20.glGetUniformLocation(currentProgram, "normals")
+            if (normalMapLocation != -1) {
+                GL13.glActiveTexture(GL13.GL_TEXTURE0 + 2)
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, MCglTFSystem.defaultNormalMap)
+                GL20.glUniform1i(normalMapLocation, 2)
+            }
+            val specularMapLocation = GL20.glGetUniformLocation(currentProgram, "specular")
+            if (specularMapLocation != -1) {
+                GL13.glActiveTexture(GL13.GL_TEXTURE0 + 1)
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, MCglTFSystem.defaultSpecularMap)
+                GL20.glUniform1i(specularMapLocation, 1)
+            }
+            GL20.glVertexAttrib4f(vaColor, 1.0f, 1.0f, 1.0f, 1.0f)
+            val entityColorLocation = GL20.glGetUniformLocation(currentProgram, "entityColor")
+            if (entityColorLocation != -1) GL20.glUniform4f(entityColorLocation, 1.0f, 1.0f, 1.0f, 0.0f)
+            GL11.glDisable(GL11.GL_BLEND)
+            GL11.glEnable(GL11.GL_CULL_FACE)
+        } else Runnable {
             GL13.glActiveTexture(COLOR_MAP_INDEX)
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, MCglTFSystem.defaultColorMap)
             GL13.glActiveTexture(NORMAL_MAP_INDEX)
@@ -115,6 +135,19 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
             GL20.glUniformMatrix3fv(NORMAL_MATRIX, false, BUF_FLOAT_9)
         }
         @JvmStatic
+        fun applyTransformShaderModIris(nodeModel: NodeModel) {
+            val globalTransform = findGlobalTransform(nodeModel)
+            val pose = Matrix4f().setTransposed(globalTransform)
+            if (NORMAL_MATRIX != -1) {
+                val normal = Matrix3f(pose).transpose().mulLocal(CURRENT_NORMAL)
+                normal.get(BUF_FLOAT_9)
+                GL20.glUniformMatrix3fv(NORMAL_MATRIX, false, BUF_FLOAT_9)
+            }
+            pose.transpose().mulLocal(CURRENT_POSE)
+            pose.get(BUF_FLOAT_16)
+            GL20.glUniformMatrix4fv(MODEL_VIEW_MATRIX, false, BUF_FLOAT_16)
+        }
+        @JvmStatic
         fun createAccessorModel(componentType: Int, count: Int, elementType: ElementType, label: String): DefaultAccessorModel {
             val model = DefaultAccessorModel(componentType, count, elementType)
             val byteLength = count * model.paddedElementSizeInBytes
@@ -139,7 +172,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         var shaderModMaterialCommand: Runnable = shaderModDefaultMaterialCommand,
         var normalTexture: TextureModel? = null
     )
-    private val rootNodeModelToCommands = IdentityHashMap<NodeModel, Triple<MutableList<Runnable>, MutableList<Runnable>, MutableList<Runnable>>>()
+    protected val rootNodeModelToCommands = IdentityHashMap<NodeModel, Triple<MutableList<Runnable>, MutableList<Runnable>, MutableList<Runnable>>>()
     private val positionsAccessorModelToNormalsAccessorModel = IdentityHashMap<AccessorModel, AccessorModel>()
     private val normalsAccessorModelToTangentsAccessorModel = IdentityHashMap<AccessorModel, AccessorModel>()
     private val colorsAccessorModelVec3ToVec4 = IdentityHashMap<AccessorModel, AccessorModel>()
@@ -151,11 +184,12 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
     private val meshPrimitiveModelToUnindexed = IdentityHashMap<MeshPrimitiveModel, Pair<Map<String, AccessorModel>, List<Map<String, AccessorModel>>>>()
     private val bufferViewModelToGlBufferView = IdentityHashMap<BufferViewModel, Int>()
     private val textureModelToGlTexture = IdentityHashMap<TextureModel, Int>()
-    private val materialModelToRenderedMaterial = IdentityHashMap<MaterialModel, Material>()
+    protected val materialModelToRenderedMaterial = IdentityHashMap<MaterialModel, Material>()
+    protected open val shaderModTransform: (NodeModel) -> Unit = ::applyTransformShaderMod
     constructor(gltfRenderData: MutableList<Runnable>, gltfModel: GltfModel) : this(gltfModel) {
         processSceneModels(gltfRenderData, gltfModel.sceneModels)
     }
-    fun processSceneModels(gltfRenderData: MutableList<Runnable>, sceneModels: List<SceneModel>) {
+    open fun processSceneModels(gltfRenderData: MutableList<Runnable>, sceneModels: List<SceneModel>) {
         for (sceneModel in sceneModels) {
             val renderedGltfScene = RenderedGltfScene()
             renderedGltfScenes.add(renderedGltfScene)
@@ -215,7 +249,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
             shaderModRenderCommands.add(Runnable {
                 val scale = nodeModel.scale
                 if (scale == null || scale[0] != 0.0f || scale[1] != 0.0f || scale[2] != 0.0f) {
-                    applyTransformShaderMod(nodeModel)
+                    shaderModTransform(nodeModel)
                     shaderModNodeRenderCommands.forEach(Runnable::run)
                 }
             })
@@ -446,7 +480,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val weightsAccessorModel = attributes["WEIGHTS_0"]!!
         bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
         setupVertexAttrib(weightsAccessorModel, skinning_weight)
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -608,7 +642,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val weightsAccessorModel = attributes["WEIGHTS_0"]!!
         bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
         setupVertexAttrib(weightsAccessorModel, skinning_weight)
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -617,7 +651,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         setupVertexAttrib(positionsAccessorModel, skinning_position)
         val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
         targetAccessorDatas = ArrayList(morphTargets.size)
-        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
             setupVertexAttrib(normalsAccessorModel, skinning_normal)
@@ -650,7 +684,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
         setupVertexAttrib(weightsAccessorModel, skinning_weight)
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -695,7 +729,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
         setupVertexAttrib(weightsAccessorModel, skinning_weight)
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -705,7 +739,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
         val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
         targetAccessorDatas = ArrayList(morphTargets.size)
-        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, normalsAccessorModel, targetAccessorDatas)
             setupVertexAttrib(normalsAccessorModel, skinning_normal)
@@ -738,7 +772,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         bindArrayBufferViewModel(gltfRenderData, weightsAccessorModel.bufferViewModel)
         setupVertexAttrib(weightsAccessorModel, skinning_weight)
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, skinningCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -842,7 +876,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         gltfRenderData.add(Runnable { GL30.glDeleteVertexArrays(glVertexArray) })
         GL30.glBindVertexArray(glVertexArray)
         val morphTargets = meshPrimitiveModel.targets
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -876,7 +910,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         gltfRenderData.add(Runnable { GL30.glDeleteVertexArrays(glVertexArray) })
         GL30.glBindVertexArray(glVertexArray)
         val morphTargets = meshPrimitiveModel.targets
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -885,7 +919,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         setupVertexAttrib(positionsAccessorModel, vaPosition)
         val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
         targetAccessorDatas = ArrayList(morphTargets.size)
-        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, normalsAccessorModel, targetAccessorDatas)
             setupVertexAttrib(normalsAccessorModel, vaNormal)
@@ -911,7 +945,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -949,7 +983,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -959,7 +993,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val normalsAccessorModel = obtainNormalsAccessorModel(positionsAccessorModel)
         val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
         targetAccessorDatas = ArrayList(morphTargets.size)
-        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, normalsAccessorModel, targetAccessorDatas)
             setupVertexAttrib(normalsAccessorModel, vaNormal)
@@ -985,7 +1019,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION")) {
             bindVec3FloatMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         } else {
@@ -1031,7 +1065,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         var colorsAccessorModel = attributes["COLOR_0"]
         if (colorsAccessorModel != null) {
             colorsAccessorModel = obtainVec4ColorsAccessorModel(colorsAccessorModel)
-            var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+            var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
             if (createColorMorphTarget(morphTargets, targetAccessorDatas, "COLOR_0")) {
                 colorsAccessorModel = bindColorMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, colorsAccessorModel, targetAccessorDatas)
             } else {
@@ -1041,7 +1075,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         }
         var texcoordsAccessorModel = attributes["TEXCOORD_0"]
         if (texcoordsAccessorModel != null) {
-            var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+            var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
             if (createTexcoordMorphTarget(morphTargets, targetAccessorDatas, "TEXCOORD_0")) {
                 texcoordsAccessorModel = bindTexcoordMorphed(gltfRenderData, nodeModel, meshModel, renderCommand, texcoordsAccessorModel, targetAccessorDatas)
             } else {
@@ -1135,7 +1169,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
             glTexture
         }
     }
-    fun obtainMaterial(gltfRenderData: MutableList<Runnable>, materialModel: MaterialModel): Material {
+    open fun obtainMaterial(gltfRenderData: MutableList<Runnable>, materialModel: MaterialModel): Material {
         return materialModelToRenderedMaterial.getOrPut(materialModel) {
             val material = Material()
             if (materialModel is MaterialModelV2) {
@@ -1326,7 +1360,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
             Pair(newAttributes as Map<String, AccessorModel>, newMorphTargets)
         }
     }
-    fun createMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData>, attribute: String): Boolean {
+    fun createMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData?>, attribute: String): Boolean {
         var found = false
         for (morphTarget in morphTargets) {
             val accessor = morphTarget[attribute]
@@ -1337,30 +1371,74 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         }
         return found
     }
-    fun createColorMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData>, attribute: String): Boolean {
+    fun createColorMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData?>, attribute: String): Boolean {
         var found = false
         for (morphTarget in morphTargets) {
             val accessor = morphTarget[attribute]
             if (accessor != null) {
                 val data = colorsMorphTargetAccessorModelToAccessorData.getOrPut(accessor) {
-                    AccessorDatas.create(accessor) as AccessorFloatData
+                    if (accessor.elementType == ElementType.VEC3) {
+                        val count = accessor.count
+                        val vec4Model = AccessorModelCreation.createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC4, "")
+                        val dst = AccessorDatas.createFloat(vec4Model)
+                        val src = AccessorDatas.create(accessor)
+                        for (i in 0 until count) {
+                            dst.set(i, 0, VecMath.accessorDataGetFloat(src, i, 0))
+                            dst.set(i, 1, VecMath.accessorDataGetFloat(src, i, 1))
+                            dst.set(i, 2, VecMath.accessorDataGetFloat(src, i, 2))
+                            dst.set(i, 3, 0.0f)
+                        }
+                        dst
+                    } else if (accessor.componentDataType != Float::class.javaPrimitiveType) {
+                        val count = accessor.count
+                        val vec4Model = AccessorModelCreation.createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC4, "")
+                        val dst = AccessorDatas.createFloat(vec4Model)
+                        val src = AccessorDatas.create(accessor)
+                        for (i in 0 until count) {
+                            dst.set(i, 0, VecMath.accessorDataGetFloat(src, i, 0))
+                            dst.set(i, 1, VecMath.accessorDataGetFloat(src, i, 1))
+                            dst.set(i, 2, VecMath.accessorDataGetFloat(src, i, 2))
+                            dst.set(i, 3, VecMath.accessorDataGetFloat(src, i, 3))
+                        }
+                        dst
+                    } else {
+                        AccessorDatas.createFloat(accessor)
+                    }
                 }
                 targetAccessorDatas.add(data)
                 found = true
+            } else {
+                targetAccessorDatas.add(null)
             }
         }
         return found
     }
-    fun createTexcoordMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData>, attribute: String): Boolean {
+    fun createTexcoordMorphTarget(morphTargets: List<Map<String, AccessorModel>>, targetAccessorDatas: MutableList<AccessorFloatData?>, attribute: String): Boolean {
         var found = false
         for (morphTarget in morphTargets) {
             val accessor = morphTarget[attribute]
             if (accessor != null) {
                 val data = texcoordsMorphTargetAccessorModelToAccessorData.getOrPut(accessor) {
-                    AccessorDatas.create(accessor) as AccessorFloatData
+                    if (accessor.componentDataType != Float::class.javaPrimitiveType) {
+                        val count = accessor.count
+                        val numComponents = accessor.elementType.numComponents
+                        val floatModel = AccessorModelCreation.createAccessorModel(GL11.GL_FLOAT, count, accessor.elementType, "")
+                        val dst = AccessorDatas.createFloat(floatModel)
+                        val src = AccessorDatas.create(accessor)
+                        for (i in 0 until count) {
+                            for (c in 0 until numComponents) {
+                                dst.set(i, c, VecMath.accessorDataGetFloat(src, i, c))
+                            }
+                        }
+                        dst
+                    } else {
+                        AccessorDatas.createFloat(accessor)
+                    }
                 }
                 targetAccessorDatas.add(data)
                 found = true
+            } else {
+                targetAccessorDatas.add(null)
             }
         }
         return found
@@ -1368,7 +1446,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
     fun createNormalTangentMorphTarget(
         morphTargets: List<Map<String, AccessorModel>>,
         normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel,
-        normalTargetDatas: MutableList<AccessorFloatData>, tangentTargetDatas: MutableList<AccessorFloatData>
+        normalTargetDatas: MutableList<AccessorFloatData?>, tangentTargetDatas: MutableList<AccessorFloatData?>
     ): Boolean {
         var found = false
         for (morphTarget in morphTargets) {
@@ -1392,22 +1470,72 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         }
         return found
     }
+    private fun runMikkTangentDelta(
+        numFaces: Int, targetData: AccessorFloatData,
+        posData: AccessorFloatData, normData: AccessorFloatData,
+        texData: AccessorData, tangData: AccessorFloatData,
+        deltaPosData: AccessorFloatData?, deltaNormData: AccessorFloatData?,
+        deltaTexData: AccessorData?
+    ) {
+        MikktspaceTangentGenerator.genTangSpaceDefault(object : MikkTSpaceContext {
+            override fun getNumFaces(): Int = numFaces
+            override fun getNumVerticesOfFace(face: Int): Int = 3
+            override fun getPosition(posOut: FloatArray, face: Int, vert: Int) {
+                val i = face * 3 + vert
+                posOut[0] = posData.get(i, 0) + (deltaPosData?.get(i, 0) ?: 0f)
+                posOut[1] = posData.get(i, 1) + (deltaPosData?.get(i, 1) ?: 0f)
+                posOut[2] = posData.get(i, 2) + (deltaPosData?.get(i, 2) ?: 0f)
+            }
+            override fun getNormal(normOut: FloatArray, face: Int, vert: Int) {
+                val i = face * 3 + vert
+                normOut[0] = normData.get(i, 0) + (deltaNormData?.get(i, 0) ?: 0f)
+                normOut[1] = normData.get(i, 1) + (deltaNormData?.get(i, 1) ?: 0f)
+                normOut[2] = normData.get(i, 2) + (deltaNormData?.get(i, 2) ?: 0f)
+            }
+            override fun getTexCoord(texOut: FloatArray, face: Int, vert: Int) {
+                val i = face * 3 + vert
+                texOut[0] = VecMath.accessorDataGetFloat(texData, i, 0) + if (deltaTexData != null) VecMath.accessorDataGetFloat(deltaTexData, i, 0) else 0f
+                texOut[1] = VecMath.accessorDataGetFloat(texData, i, 1) + if (deltaTexData != null) VecMath.accessorDataGetFloat(deltaTexData, i, 1) else 0f
+            }
+            override fun setTSpaceBasic(tangent: FloatArray, sign: Float, face: Int, vert: Int) {
+                val i = face * 3 + vert
+                targetData.set(i, 0, tangent[0] - tangData.get(i, 0))
+                targetData.set(i, 1, tangent[1] - tangData.get(i, 1))
+                targetData.set(i, 2, tangent[2] - tangData.get(i, 2))
+            }
+            override fun setTSpace(tangent: FloatArray, biTangent: FloatArray, magS: Float, magT: Float, isOrientationPreserving: Boolean, face: Int, vert: Int) {}
+        })
+    }
     fun createTangentMorphTarget(
         morphTargets: List<Map<String, AccessorModel>>,
-        tangentTargetDatas: MutableList<AccessorFloatData>,
+        tangentTargetDatas: MutableList<AccessorFloatData?>,
         positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel,
         texcoordsAccessorModel: AccessorModel, texcoordAttribute: String,
         tangentsAccessorModel: AccessorModel
     ): Boolean {
         var found = false
+        val count = positionsAccessorModel.count
+        val numFaces = count / 3
+        val posData = AccessorDatas.createFloat(positionsAccessorModel)
+        val normData = AccessorDatas.createFloat(normalsAccessorModel)
+        val tangData = AccessorDatas.createFloat(tangentsAccessorModel)
+        val texData = AccessorDatas.create(texcoordsAccessorModel)
         for (morphTarget in morphTargets) {
             val posAccessor = morphTarget["POSITION"]
             val normAccessor = morphTarget["NORMAL"]
-            if (posAccessor != null || normAccessor != null) {
-                val count = positionsAccessorModel.count
-                val tangentData = createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC4, "morphMikkTangent")
-                tangentTargetDatas.add(tangentData.accessorData as AccessorFloatData)
+            val texAccessor = morphTarget[texcoordAttribute]
+            if (posAccessor != null || normAccessor != null || texAccessor != null) {
                 found = true
+                val targetData = AccessorDatas.createFloat(AccessorModelCreation.createAccessorModel(GL11.GL_FLOAT, count, ElementType.VEC3, ""))
+                tangentTargetDatas.add(targetData)
+                runMikkTangentDelta(
+                    numFaces, targetData, posData, normData, texData, tangData,
+                    posAccessor?.let { AccessorDatas.createFloat(it) },
+                    normAccessor?.let { AccessorDatas.createFloat(it) },
+                    texAccessor?.let { AccessorDatas.create(it) }
+                )
+            } else {
+                tangentTargetDatas.add(null)
             }
         }
         return found
@@ -1415,7 +1543,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
     fun bindVec3FloatMorphed(
         gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
         renderCommand: MutableList<Runnable>, baseAccessorModel: AccessorModel,
-        targetAccessorDatas: List<AccessorFloatData>
+        targetAccessorDatas: List<AccessorFloatData?>
     ) {
         val count = baseAccessorModel.count
         val numComponents = baseAccessorModel.elementType.numComponents
@@ -1432,8 +1560,9 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
                 for (c in 0 until numComponents) {
                     var value = baseData.get(i, c)
                     for (t in targetAccessorDatas.indices) {
-                        if (t < weights.size) {
-                            value += weights[t] * targetAccessorDatas[t].get(i, c)
+                        val target = targetAccessorDatas[t]
+                        if (t < weights.size && target != null) {
+                            value += weights[t] * target.get(i, c)
                         }
                     }
                     morphedData.set(i, c, value)
@@ -1447,7 +1576,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
     fun bindColorMorphed(
         gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
         renderCommand: MutableList<Runnable>, baseAccessorModel: AccessorModel,
-        targetAccessorDatas: List<AccessorFloatData>
+        targetAccessorDatas: List<AccessorFloatData?>
     ): AccessorModel {
         val count = baseAccessorModel.count
         val baseData = AccessorDatas.create(baseAccessorModel) as AccessorFloatData
@@ -1464,8 +1593,9 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
                 for (c in 0 until 4) {
                     var value = if (c < srcComponents) baseData.get(i, c) else 1.0f
                     for (t in targetAccessorDatas.indices) {
-                        if (t < weights.size && c < targetAccessorDatas[t].numComponentsPerElement) {
-                            value += weights[t] * targetAccessorDatas[t].get(i, c)
+                        val target = targetAccessorDatas[t]
+                        if (t < weights.size && target != null && c < target.numComponentsPerElement) {
+                            value += weights[t] * target.get(i, c)
                         }
                     }
                     morphedData.set(i, c, value.coerceIn(0.0f, 1.0f))
@@ -1480,7 +1610,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
     fun bindTexcoordMorphed(
         gltfRenderData: MutableList<Runnable>, nodeModel: NodeModel, meshModel: MeshModel,
         renderCommand: MutableList<Runnable>, baseAccessorModel: AccessorModel,
-        targetAccessorDatas: List<AccessorFloatData>
+        targetAccessorDatas: List<AccessorFloatData?>
     ): AccessorModel {
         val count = baseAccessorModel.count
         val numComponents = baseAccessorModel.elementType.numComponents
@@ -1497,8 +1627,9 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
                 for (c in 0 until numComponents) {
                     var value = baseData.get(i, c)
                     for (t in targetAccessorDatas.indices) {
-                        if (t < weights.size) {
-                            value += weights[t] * targetAccessorDatas[t].get(i, c)
+                        val target = targetAccessorDatas[t]
+                        if (t < weights.size && target != null) {
+                            value += weights[t] * target.get(i, c)
                         }
                     }
                     morphedData.set(i, c, value)
@@ -1712,7 +1843,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel, tangentsAccessorModel: AccessorModel
     ) {
         val morphTargets = meshPrimitiveModel.targets
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
             obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         else AccessorModelCreation.instantiate(positionsAccessorModel, "")
@@ -1738,13 +1869,13 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         positionsAccessorModel: AccessorModel, normalsAccessorModel: AccessorModel
     ) {
         val morphTargets = meshPrimitiveModel.targets
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
             obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         else AccessorModelCreation.instantiate(positionsAccessorModel, "")
         val tangentsAccessorModel = obtainTangentsAccessorModel(normalsAccessorModel)
         targetAccessorDatas = ArrayList(morphTargets.size)
-        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        val tangentTargetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputNormals: AccessorModel
         val outputTangents: AccessorModel
         if (createNormalTangentMorphTarget(morphTargets, normalsAccessorModel, tangentsAccessorModel, targetAccessorDatas, tangentTargetAccessorDatas)) {
@@ -1770,7 +1901,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
             obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         else AccessorModelCreation.instantiate(positionsAccessorModel, "")
@@ -1801,7 +1932,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
             obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         else AccessorModelCreation.instantiate(positionsAccessorModel, "")
@@ -1835,7 +1966,7 @@ class RenderedGltfModel(val gltfModel: GltfModel, val renderedGltfScenes: Mutabl
         val attributes = unindexed.first
         val morphTargets = unindexed.second
         val positionsAccessorModel = attributes["POSITION"]!!
-        var targetAccessorDatas = ArrayList<AccessorFloatData>(morphTargets.size)
+        var targetAccessorDatas = ArrayList<AccessorFloatData?>(morphTargets.size)
         val outputPositions = if (createMorphTarget(morphTargets, targetAccessorDatas, "POSITION"))
             obtainVec3FloatMorphedModel(nodeModel, meshModel, renderCommand, positionsAccessorModel, targetAccessorDatas)
         else AccessorModelCreation.instantiate(positionsAccessorModel, "")
